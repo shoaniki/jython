@@ -606,10 +606,31 @@ public class PyJavaType extends PyType {
                 // pkg = λ(c) c.getPackageName() : Class → String
                 MethodHandle pkg = LOOKUP.findVirtual(Class.class, "getPackageName",
                         MethodType.methodType(String.class));
-                // exps = λ(m, pn) m.isExported(pn) : Module, String → boolean
-                MethodHandle exps = LOOKUP.findVirtual(moduleClass, "isExported",
-                        MethodType.methodType(boolean.class, String.class));
-                // expc = λ(m, c) exps(m, pkg(c)) : Module, Class → boolean
+
+                Object thisMod;
+                try {
+                    thisMod = mod.invoke(Py.class);
+                    MethodHandle named = LOOKUP.findVirtual(moduleClass, "isNamed",
+                            MethodType.methodType(boolean.class));
+                    if (!(boolean)named.invoke(thisMod)) thisMod = null;
+                } catch (Throwable ignore) {
+                    thisMod = null;
+                }
+
+                MethodHandle exps;
+                if (thisMod == null) {
+                    // exps = λ(m, pn) m.isExported(pn) : Module, String → boolean
+                    exps = LOOKUP.findVirtual(moduleClass, "isExported",
+                            MethodType.methodType(boolean.class, String.class));
+                } else {
+                    // expt = λ(m, pn, tm) m.isExported(pn, tm) : Module, String, Module → boolean
+                    MethodHandle expt = LOOKUP.findVirtual(moduleClass, "isExported",
+                        MethodType.methodType(boolean.class, String.class, Module.class));
+                    // exps = λ(m, pn) expt(m, pn, THIS-MODULE) : Module, String → boolean
+                    exps = MethodHandles.insertArguments(expt, 2, thisMod);
+                }
+
+                // expc = λ(m, c) expt(m, pkg(c)) : Module, Class → boolean
                 MethodHandle expc = MethodHandles.filterArguments(exps, 1, pkg);
                 // acc = λ(c) expc(mod(c), c) : Class → boolean
                 acc = MethodHandles.foldArguments(expc, mod);
